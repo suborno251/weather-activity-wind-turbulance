@@ -1,0 +1,19 @@
+name: Keep Render Backend Active
+
+on:
+  schedule:
+    # Runs every 14 minutes (Render free tier spins down after 15 min of inactivity)
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Backend Health Endpoint
+        run: |
+          TARGET="${{ secrets.BACKEND_URL || vars.BACKEND_URL || 'https://weather-activity-wind-turbulance.onrender.com' }}"
+          # Remove trailing slash if present
+          TARGET="${TARGET%/}"
+          echo "Pinging ${TARGET}/api/health ..."
+          curl -sS -m 60 "${TARGET}/api/health" || echo "Ping sent (service may currently be waking up)"
