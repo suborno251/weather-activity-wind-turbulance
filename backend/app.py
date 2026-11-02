@@ -23,10 +23,90 @@ import requests
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.encoders import encoders_by_class_tuples
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field
 
 # Ensure NumPy scalar types serialize properly in FastAPI responses
 encoders_by_class_tuples[int] = (np.integer,)
 encoders_by_class_tuples[float] = (np.floating,)
+
+# ----------------------------------------------------------------------------- schemas
+class HealthResponse(BaseModel):
+    status: str = Field(default="ok", description="Service health status", json_schema_extra={"example": "ok"})
+
+
+class SeriesPoint(BaseModel):
+    time: str = Field(description="Half-hour slot time (HH:MM) in GB local time", json_schema_extra={"example": "12:00"})
+    forecast: float | None = Field(description="Wind generation forecast in MW", json_schema_extra={"example": 8500.5})
+    actual: float | None = Field(description="Actual wind generation delivered in MW", json_schema_extra={"example": 8210.0})
+    lower: float = Field(description="P5 conservative lower bound (forecast - Q95 error)", json_schema_extra={"example": 6800.0})
+    upper: float = Field(description="P95 upper bound (forecast - Q05 error)", json_schema_extra={"example": 9600.0})
+
+
+class ProcurementPeriod(BaseModel):
+    label: str = Field(description="Delivery block label", json_schema_extra={"example": "Morning 06:00–12:00"})
+    forecast_mw: float = Field(description="Mean expected wind generation in MW", json_schema_extra={"example": 7400.2})
+    p95_error_mw: float = Field(description="Historical P95 error buffer in MW", json_schema_extra={"example": 1850.0})
+    low_wind_mw: float = Field(description="Conservative baseline generation (Forecast - P95 buffer)", json_schema_extra={"example": 5550.2})
+
+
+class DecisionKpis(BaseModel):
+    peak_mw: float = Field(description="Peak expected wind generation across delivery day in MW", json_schema_extra={"example": 11200.0})
+    peak_time: str = Field(description="Time of peak wind generation", json_schema_extra={"example": "14:30"})
+    avg_mw: float = Field(description="Daily average expected wind generation in MW", json_schema_extra={"example": 8100.5})
+
+
+class DecisionResponse(BaseModel):
+    kpis: DecisionKpis = Field(description="High-level day summary KPIs")
+    series: list[SeriesPoint] = Field(description="48 half-hour settlement slot forecast vs actual series with uncertainty bands")
+    periods: list[ProcurementPeriod] = Field(description="4-block operational procurement planning breakdown")
+
+
+class Metrics(BaseModel):
+    mae: float | None = Field(description="Mean Absolute Error in MW", json_schema_extra={"example": 1450.5})
+    rmse: float | None = Field(description="Root Mean Square Error in MW", json_schema_extra={"example": 1890.2})
+    bias: float | None = Field(description="Mean error in MW (forecast - actual, positive = over-forecast)", json_schema_extra={"example": 120.3})
+    median_abs: float | None = Field(description="Median absolute error in MW", json_schema_extra={"example": 1150.0})
+    p95: float | None = Field(description="95th percentile absolute error buffer in MW", json_schema_extra={"example": 3200.0})
+
+
+class DailyAccuracy(BaseModel):
+    date: str = Field(description="Delivery date (DD Mon)", json_schema_extra={"example": "15 Jan"})
+    mae: float = Field(description="Mean Absolute Error for this day in MW", json_schema_extra={"example": 1620.4})
+
+
+class HistogramBin(BaseModel):
+    bin: str = Field(description="Error bin start in MW", json_schema_extra={"example": "-1000"})
+    count: int = Field(description="Frequency count of half-hour slots in this bin", json_schema_extra={"example": 42})
+
+
+class SlotAccuracy(BaseModel):
+    slot: str = Field(description="Half-hour slot time (HH:MM)", json_schema_extra={"example": "17:30"})
+    mae: float = Field(description="Mean Absolute Error across month for this slot in MW", json_schema_extra={"example": 1820.0})
+
+
+class HorizonDecay(BaseModel):
+    horizon_h: int = Field(description="Forecast horizon hours ahead of delivery", json_schema_extra={"example": 24})
+    mae: float = Field(description="Mean Absolute Error in MW", json_schema_extra={"example": 1950.0})
+
+
+class CutoffComparisonItem(BaseModel):
+    cutoff: str = Field(description="Gate closure cutoff time", json_schema_extra={"example": "12:00"})
+    mae: float | None = Field(description="Mean Absolute Error in MW", json_schema_extra={"example": 1450.5})
+    rmse: float | None = Field(description="Root Mean Square Error in MW", json_schema_extra={"example": 1890.2})
+    bias: float | None = Field(description="Signed bias in MW", json_schema_extra={"example": 120.3})
+    p95: float | None = Field(description="P95 error buffer in MW", json_schema_extra={"example": 3200.0})
+
+
+class AccuracyResponse(BaseModel):
+    metrics: Metrics = Field(description="Overall aggregate error KPIs for selected cutoff")
+    daily: list[DailyAccuracy] = Field(description="Daily MAE timeline across January 2026")
+    histogram: list[HistogramBin] = Field(description="Error distribution histogram bins")
+    by_slot: list[SlotAccuracy] = Field(description="Diurnal error profile by settlement half-hour")
+    by_horizon: list[HorizonDecay] = Field(description="Error decay by forecast publication horizon (0–48h)")
+    cutoff_comparison: list[CutoffComparisonItem] = Field(description="Accuracy comparison across standard industry cutoffs")
+
 
 # ----------------------------------------------------------------------------- config
 BASE_URL = os.getenv("ELEXON_BASE_URL", "https://data.elexon.co.uk/bmrs/api/v1")
@@ -44,13 +124,63 @@ COMPARE_CUTOFFS = ["06:00", "09:00", "12:00", "15:00"]
 PERIODS = [("Night 00:00–06:00", 0, 6), ("Morning 06:00–12:00", 6, 12),
            ("Afternoon 12:00–18:00", 12, 18), ("Evening 18:00–24:00", 18, 24)]
 
-app = FastAPI(title="Wind Forecast Monitor API")
+tags_metadata = [
+    {
+        "name": "Decision Support",
+        "description": "Day-ahead forecast evaluation with gate-closure cutoff filtering and procurement risk buffers.",
+    },
+    {
+        "name": "Forecast Accuracy",
+        "description": "Historical error analysis including MAE, RMSE, diurnal bias, horizon decay, and cutoff benchmarking.",
+    },
+    {
+        "name": "System",
+        "description": "Operational health check and diagnostics.",
+    },
+]
+
+app = FastAPI(
+    title="Wind Forecast Monitor API",
+    description="""
+## Day-Ahead Wind Forecast & Procurement Portal API
+
+Interactive Swagger API for GB national renewable wind generation analysis based on Elexon BMRS data (**January 2026**).
+
+### Features:
+- **Decision View**: Reproduces exact forecasts known prior to cutoff on $D-1$ and calculates procurement buffers.
+- **Accuracy View**: Measures historical forecast accuracy (MAE, RMSE, Bias, P95) and cutoff comparisons.
+- **Interactive Documentation**: Test endpoints live with Swagger UI below or via `/docs` and `/redoc`.
+""",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    openapi_tags=tags_metadata,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+# ----------------------------------------------------------------------------- Swagger/Docs aliases
+@app.get("/swagger", include_in_schema=False)
+def swagger_ui_redirect():
+    """Redirect /swagger to /docs."""
+    return RedirectResponse(url="/docs")
+
+
+@app.get("/api/docs", include_in_schema=False)
+def api_docs_ui():
+    """Serve Swagger UI directly under /api/docs for reverse proxies that only expose /api."""
+    return get_swagger_ui_html(openapi_url="/api/openapi.json", title="Wind Forecast Monitor API - Swagger UI")
+
+
+@app.get("/api/openapi.json", include_in_schema=False)
+def api_openapi_schema():
+    """Serve OpenAPI JSON schema under /api for reverse proxies."""
+    return app.openapi()
 
 
 # ----------------------------------------------------------------------------- fetching
@@ -169,13 +299,34 @@ def _clean(v):
 
 
 # ----------------------------------------------------------------------------- endpoints
-@app.get("/api/health")
+@app.get(
+    "/api/health",
+    response_model=HealthResponse,
+    tags=["System"],
+    summary="Service Health Check",
+)
 def health():
+    """Verify backend API health status."""
     return {"status": "ok"}
 
 
-@app.get("/api/decision")
-def decision(date: Date, cutoff: str = Query("12:00")):
+@app.get(
+    "/api/decision",
+    response_model=DecisionResponse,
+    tags=["Decision Support"],
+    summary="Day-Ahead Forecast & Procurement Decision Snapshot",
+)
+def decision(
+    date: Date = Query(..., description="Delivery date in January 2026 (YYYY-MM-DD)", examples=["2026-01-15"]),
+    cutoff: str = Query("12:00", description="Gate closure decision cutoff time on D-1 (HH:MM in 24h format)", examples=["12:00"]),
+):
+    """Retrieve the wind forecast known prior to gate closure on D-1 for the delivery day.
+
+    Calculates:
+    - 48 half-hour settlement slots with forecast, actual generation, and uncertainty bounds.
+    - 4 operational delivery periods with conservative low-wind procurement baselines.
+    - Day-level peak and average expected generation KPIs.
+    """
     if not (SCOPE_START <= date <= SCOPE_END):
         raise HTTPException(422, "date must be in January 2026")
     df = latest_before_cutoff(cutoff)
@@ -219,8 +370,25 @@ def _by_horizon() -> list[dict]:
     return [{"horizon_h": int(h), "mae": float(v)} for h, v in g.items()]
 
 
-@app.get("/api/accuracy")
-def accuracy(cutoff: str = Query("12:00")):
+@app.get(
+    "/api/accuracy",
+    response_model=AccuracyResponse,
+    tags=["Forecast Accuracy"],
+    summary="Aggregate Accuracy Metrics & Cutoff Benchmarks",
+)
+def accuracy(
+    cutoff: str = Query("12:00", description="Gate closure cutoff time on D-1 (HH:MM in 24h format)", examples=["12:00"]),
+):
+    """Compute aggregate accuracy metrics across January 2026 for the given decision cutoff.
+
+    Includes:
+    - Key metrics (MAE, RMSE, Bias, Median Absolute Error, P95 risk buffer).
+    - Daily MAE breakdown across the entire delivery month.
+    - Error distribution histogram.
+    - Diurnal accuracy patterns by 30-minute settlement slot.
+    - Forecast accuracy decay by publish horizon (0 to 48 hours).
+    - Multi-cutoff benchmark comparison table.
+    """
     df = latest_before_cutoff(cutoff)
     err = df["error"].dropna()
     if err.empty:

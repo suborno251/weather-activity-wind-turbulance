@@ -38,6 +38,8 @@ export default function Layout() {
           <span>GB National Wind Power Purchasing</span>
         </div>
         <div className="footer-right">
+          <a href="/docs" target="_blank" rel="noreferrer" className="footer-link">Swagger Docs</a>
+          <span className="footer-sep">·</span>
           <span>Data source: <a href="https://bmrs.elexon.co.uk/" target="_blank" rel="noreferrer" className="footer-link">Elexon BMRS</a> (FUELHH &amp; WINDFOR)</span>
         </div>
       </footer>
