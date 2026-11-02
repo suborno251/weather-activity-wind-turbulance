@@ -7,11 +7,8 @@ Refresh:  python app.py refresh      (downloads Elexon data into ./data as CSV)
 """
 from __future__ import annotations
 
-import asyncio
-import logging
 import os
 import sys
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Ensure backend root is in sys.path for direct module imports
@@ -19,7 +16,6 @@ BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-import httpx
 import numpy as np
 from fastapi import FastAPI
 from fastapi.encoders import encoders_by_class_tuples
@@ -32,39 +28,6 @@ from routers import accuracy, decision, health
 # Re-exports for backwards compatibility
 from services.analysis import latest_before_cutoff, load_store  # noqa: F401
 from services.elexon import refresh_data  # noqa: F401
-
-logger = logging.getLogger("uvicorn.info")
-
-
-async def _keep_alive_worker():
-    """Background worker that periodically pings external URL to prevent Render from sleeping."""
-    await asyncio.sleep(60)  # Wait 1 minute after startup
-    target = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("KEEP_ALIVE_URL")
-    if not target:
-        return
-    url = f"{target.rstrip('/')}/api/health"
-    logger.info(f"Keep-alive worker active targeting {url}")
-    while True:
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                res = await client.get(url)
-                logger.info(f"Keep-alive ping to {url}: HTTP {res.status_code}")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"Keep-alive ping failed: {exc}")
-        # Ping every 12 minutes (Render free tier timeout is 15 minutes)
-        await asyncio.sleep(12 * 60)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    task = asyncio.create_task(_keep_alive_worker())
-    yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
-
 
 # Ensure NumPy scalar types serialize properly in FastAPI responses
 encoders_by_class_tuples[int] = (np.integer,)
@@ -87,7 +50,6 @@ Interactive Swagger API for GB national renewable wind generation analysis based
     redoc_url="/redoc",
     openapi_url="/openapi.json",
     openapi_tags=TAGS_METADATA,
-    lifespan=lifespan,
 )
 
 # CORS

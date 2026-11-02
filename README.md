@@ -170,7 +170,6 @@ Render free services spin down after 15 minutes of inactivity. To keep your serv
 1. **GitHub Actions Cron Workflow** (`.github/workflows/keep-alive.yml`): Automatically pings `GET /api/health` every 14 minutes.
 2. In your GitHub repository under **Settings** > **Secrets and variables** > **Actions**, optionally set:
    - Variable `BACKEND_URL`: `https://weather-activity-wind-turbulance.onrender.com` (or your chosen Render URL).
-3. The backend also includes a built-in background keep-alive task in `app.py` that pings Render's `RENDER_EXTERNAL_URL` every 12 minutes while running.
 
 ---
 
