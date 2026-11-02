@@ -61,6 +61,12 @@ app.add_middleware(
 )
 
 # ----------------------------------------------------------------------------- Swagger/Docs aliases
+@app.get("/", include_in_schema=False)
+def root_redirect():
+    """Redirect root path to interactive Swagger API documentation."""
+    return RedirectResponse(url="/docs")
+
+
 @app.get("/swagger", include_in_schema=False)
 def swagger_ui_redirect():
     """Redirect /swagger to /docs."""
