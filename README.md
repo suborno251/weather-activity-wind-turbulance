@@ -39,11 +39,21 @@ This application ingests national GB wind actuals (`FUELHH`) and forecasts (`WIN
 
 ```text
 .
+├── Dockerfile                   # Root Dockerfile for cloud platforms (Render, Railway)
 ├── docker-compose.yml           # Multi-container orchestration (FastAPI + Nginx)
 ├── README.md                    # Root project documentation & challenge deliverables
 ├── .gitignore                   # Root git exclusion rules
 ├── backend/
-│   ├── app.py                   # FastAPI application, data processing, and analytical endpoints
+│   ├── app.py                   # FastAPI entrypoint, middleware, and router registration
+│   ├── config.py                # Global settings, Elexon endpoints, scope dates, and delivery periods
+│   ├── schemas.py               # Pydantic request & response models with OpenAPI documentation
+│   ├── routers/
+│   │   ├── health.py            # /api/health operational monitoring route
+│   │   ├── decision.py          # /api/decision day-ahead snapshot & procurement buffer route
+│   │   └── accuracy.py          # /api/accuracy statistical metrics & cutoff benchmarking route
+│   ├── services/
+│   │   ├── elexon.py            # Elexon BMRS API client (FUELHH actuals & WINDFOR forecasts)
+│   │   └── analysis.py          # Cutoff matching algorithm, KPI metrics, and horizon decay
 │   ├── requirements.txt         # Python dependencies (FastAPI, pandas, numpy, uvicorn, requests)
 │   ├── Dockerfile               # Production Python 3.12 container specification
 │   ├── .gitignore               # Backend-specific exclusions

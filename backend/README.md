@@ -63,7 +63,16 @@ Returns aggregated forecast accuracy metrics across January 2026 for a specified
 
 ```text
 .
-├── app.py               # FastAPI application, cutoff matching algorithm, and analytical logic
+├── app.py               # FastAPI entrypoint, middleware, Swagger routing, and router registration
+├── config.py            # Global settings, Elexon endpoints, scope dates, and delivery periods
+├── schemas.py           # Pydantic request & response models with OpenAPI documentation
+├── routers/
+│   ├── health.py        # /api/health operational monitoring route
+│   ├── decision.py      # /api/decision day-ahead snapshot & procurement buffer route
+│   └── accuracy.py      # /api/accuracy statistical metrics & cutoff benchmarking route
+├── services/
+│   ├── elexon.py        # Elexon BMRS API client (FUELHH actuals & WINDFOR forecasts)
+│   └── analysis.py      # Cutoff matching algorithm, KPI metrics, and horizon decay
 ├── requirements.txt     # Python dependencies (FastAPI, pandas, numpy, uvicorn, requests, httpx)
 ├── Dockerfile           # Production Python 3.12-slim Docker container
 ├── .gitignore           # Python virtualenv and cache exclusions
