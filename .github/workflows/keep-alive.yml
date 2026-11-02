@@ -2,8 +2,10 @@ name: Keep Render Backend Active
 
 on:
   schedule:
-    # Runs every 14 minutes (Render free tier spins down after 15 min of inactivity)
-    - cron: '*/14 * * * *'
+    # Runs every 14 minutes during active hours (06:00 to 22:00 UTC / UK time).
+    # Sleeps for 8 hours overnight (22:00 to 06:00 UTC), consuming ~496 hours/month.
+    # This prevents hitting Render's 750 free instance hours limit with a ~254h safety buffer!
+    - cron: '*/14 6-21 * * *'
   workflow_dispatch:
 
 jobs:
