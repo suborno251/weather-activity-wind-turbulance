@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+dist/
+env/
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Environment files
+.env
+.env.local
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Challenge PDF prompt (avoid public leak)
+*.pdf
